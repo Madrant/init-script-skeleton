@@ -1,0 +1,102 @@
+#!/bin/sh
+# kFreeBSD do not accept scripts as interpreters, using #!/bin/sh and sourcing.
+if [ true != "$INIT_D_SCRIPT_SOURCED" ] ; then
+    set "$0" "$@"; INIT_D_SCRIPT_SOURCED=true . /lib/init/init-d-script
+fi
+### BEGIN INIT INFO
+# Provides:          skeleton
+# Required-Start:    $remote_fs $syslog $network
+# Required-Stop:     $remote_fs $syslog $network
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Linux service init script
+# Description:       This file should be used to construct scripts to be
+#                    placed in /etc/init.d.  This example start a
+#                    single forking daemon capable of writing a pid
+#                    file.  To get other behavoirs, implemend
+#                    do_start(), do_stop() or other functions to
+#                    override the defaults in /lib/init/init-d-script.
+### END INIT INFO
+
+# Author: Aleksey Polygaev <a.polygaev@gmail.com>
+
+# Warning! Do not use 'set -e' - init script must be reliable
+
+# init-d-script supported variables (see 'man 5 init-d-script'):
+DESC="SysV Linux Service"
+NAME="sysv-service"
+DAEMON=/usr/sbin/sysv-service
+PIDFILE=/var/run/sysv-service.pid
+
+# start-stop-daemon useful parameters (see 'man start-stop-daemon'):
+# -m --make-pidfile               - force make pid file referenced with --pidfile
+#                                   (useful if program does not create own pid file)
+# -b --background                 - force process detaching to background
+#                                   (useful if program does not detaching itself)
+# -N --nicelevel <l>              - set process nice level (-20 to 19, see 'man nice')
+# -P --prosched <policy:priority> - set process scheduler policy (other, fifo, rr) and priority
+# -I --iosched  <class:priority>  - set process IO class (idle, best-effort, real-time) and priority
+START_ARGS="--make-pidfile --background"
+
+# Custom variables
+#
+# Log file location:
+LOGDIR=/var/log/cps
+LOGFILE=${LOGDIR}/${NAME}.log
+# Application options:
+LOGLEVEL=WARNING
+DAEMON_ARGS="-o --log-level ${LOGLEVEL}"
+
+# Overload do_start() and do_stop() functions in order to enable logging and custom parameters:
+
+# Return
+#   0 if daemon has been started
+#   1 if daemon was already running
+#   2 if daemon could not be started
+do_start_cmd() {
+	# Add custom pre-start code here:
+	# Create log file directory
+	if [ ! -d "${LOGDIR}" ]; then
+	    log_daemon_msg "Creating log directory '${LOGDIR}'"
+	    mkdir -p "${LOGDIR}" || return 2
+	    log_daemon_msg "Done"
+	fi
+	# Check if daemon already running
+	start-stop-daemon --start --quiet ${PIDFILE:+--pidfile ${PIDFILE}} \
+	    ${START_ARGS} \
+	    --startas ${DAEMON} --name ${NAME} --exec ${DAEMON} --test > /dev/null \
+	    || return 1
+	# Start daemon
+	# Note: bash used to run daemon and redirect stdout to log file
+	start-stop-daemon --start --quiet ${PIDFILE:+--pidfile ${PIDFILE}} \
+	    ${START_ARGS} \
+	    --name ${NAME} --startas /bin/bash -- -c "exec ${DAEMON} ${DAEMON_ARGS} > ${LOGFILE} 2>&1" \
+	    || return 2
+	# Add custom post-start code here:
+}
+
+# Return
+#   0 if daemon has been stopped
+#   1 if daemon was already stopped
+#   2 if daemon could not be stopped
+#   other if a failure occurred
+do_stop_cmd() {
+	start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 \
+	    ${STOP_ARGS} \
+	    ${PIDFILE:+--pidfile ${PIDFILE}} --name ${NAME} --exec ${DAEMON}
+	RETVAL="$?"
+	[ "${RETVAL}" = 2 ] && return 2
+	# Wait for children to finish too if this is a daemon that forks
+	# and if the daemon is only ever run from this initscript.
+	# If the above conditions are not satisfied then add some other code
+	# that waits for the process to drop all resources that could be
+	# needed by services started subsequently.  A last resort is to
+	# sleep for some time.
+	start-stop-daemon --stop --quiet --oknodo --retry=0/30/KILL/5 \
+	    ${STOP_ARGS} \
+	    --exec ${DAEMON}
+	[ "$?" = 2 ] && return 2
+	# Many daemons don't delete their pidfiles when they exit.
+	rm -f ${PIDFILE}
+	return ${RETVAL}
+}
